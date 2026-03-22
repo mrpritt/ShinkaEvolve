@@ -62,7 +62,7 @@ evo_config:
     - 0.3
     - 0.1
   # Total number of generations to run.
-  num_generations: 5
+  num_generations: 100
   # Max API spend budget — not meaningful for local models, set high.
   max_api_costs: 9999
   # Retries for resampling patch format/content before giving up.
@@ -77,7 +77,7 @@ evo_config:
   language: python
   # Candidate LLMs used for proposal generation.
   llm_models:
-    - "local/qwen3.5:27b@http://localhost:11434/v1"
+    - "local/qwen3.5:9b@http://localhost:11434/v1"
   # Shared generation kwargs for main proposal LLM calls.
   llm_kwargs:
     # Candidate temperatures to sample for generation diversity.
@@ -92,7 +92,7 @@ evo_config:
   meta_rec_interval: 5
   # LLMs used for meta-analysis/recommendation steps.
   meta_llm_models:
-    - "local/qwen3.5:27b@http://localhost:11434/v1"
+    - "local/qwen3.5:9b@http://localhost:11434/v1"
   # Generation kwargs for meta-analysis LLM calls.
   meta_llm_kwargs:
     temperatures:
@@ -104,7 +104,7 @@ evo_config:
 
   # LLMs used for novelty checking/judgment.
   novelty_llm_models:
-    - "local/qwen3.5:27b@http://localhost:11434/v1"
+    - "local/qwen3.5:9b@http://localhost:11434/v1"
   # Generation kwargs for novelty LLM calls.
   novelty_llm_kwargs:
     temperatures:
@@ -115,7 +115,7 @@ evo_config:
   # Single model, disable dynamic selection.
   llm_dynamic_selection: null
   # Directory where run outputs, logs, and artifacts are written.
-  results_dir: results/results_circle_ollama
+  results_dir: results/results_circle_ollama_100gen
 
   # Whether prompt variants are evolved during the run.
   evolve_prompts: True
