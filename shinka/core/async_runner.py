@@ -23,6 +23,7 @@ import rich.box
 
 from shinka.database import ProgramDatabase, DatabaseConfig, Program
 from shinka.database.async_dbase import AsyncProgramDatabase
+from shinka.database.types import AlgorithmCategory
 from shinka.database.prompt_dbase import (
     SystemPromptDatabase,
     SystemPromptConfig,
@@ -140,6 +141,7 @@ class AsyncRunningJob:
     active_proposals_at_start: int = 0
     running_eval_jobs_at_submit: int = 0
     parent_id: Optional[str] = None
+    target_category: Optional[Any] = None
     archive_insp_ids: List[str] = field(default_factory=list)
     top_k_insp_ids: List[str] = field(default_factory=list)
     code_diff: Optional[str] = None
@@ -509,6 +511,18 @@ class ShinkaEvolveRunner:
         # Meta task logging state (to reduce verbosity)
         self._last_meta_log_state: dict | None = None
         self._last_meta_log_info_time: float | None = None
+
+    def _get_archipelago_category(self, island_idx: Optional[int]) -> AlgorithmCategory:
+        """Dynamically map an island index to its Archipelago category."""
+        if island_idx is None:
+            return AlgorithmCategory.FREE
+        categories = [
+            AlgorithmCategory.DIVIDE_AND_CONQUER,
+            AlgorithmCategory.DYNAMIC_PROGRAMMING,
+            AlgorithmCategory.GREEDY,
+            AlgorithmCategory.FREE
+        ]
+        return categories[island_idx % len(categories)]
 
     def _save_bandit_state(self) -> None:
         """Save the LLM selection bandit state to disk."""
@@ -1563,6 +1577,7 @@ class ShinkaEvolveRunner:
                 timestamp=datetime.now().timestamp(),
                 embedding=code_embedding,
                 metadata=base_metadata,
+                category=AlgorithmCategory.FREE,
             )
 
             if self.verbose:
@@ -2828,6 +2843,9 @@ class ShinkaEvolveRunner:
                     active_proposals_at_start=active_proposals_at_start,
                     running_eval_jobs_at_submit=running_eval_jobs_at_submit,
                     parent_id=parent_program.id,
+                    target_category=AlgorithmCategory(
+                        meta_patch_data.get("target_category", AlgorithmCategory.FREE.value)
+                    ),
                     archive_insp_ids=[p.id for p in archive_programs],
                     top_k_insp_ids=[p.id for p in top_k_programs],
                     code_diff=code_diff,
@@ -2933,6 +2951,7 @@ class ShinkaEvolveRunner:
         patch_name: Optional[str],
         patch_description: Optional[str],
         success: bool,
+        target_category: Optional[AlgorithmCategory] = None,
     ):
         """Save patch attempt data to disk asynchronously for debugging and analysis."""
         # Create attempt directory structure
@@ -2973,6 +2992,7 @@ class ShinkaEvolveRunner:
             "patch_description": patch_description,
             "error_msg": error_msg,
             "timestamp": datetime.now().isoformat(),
+            "target_category": target_category.value if target_category else AlgorithmCategory.FREE.value,
         }
 
         if response:
@@ -3294,6 +3314,14 @@ class ShinkaEvolveRunner:
             if self.verbose:
                 logger.info(f"Generated FIX patch type: {patch_type}")
 
+            target_category = self._get_archipelago_category(incorrect_program.island_idx)
+            if target_category != AlgorithmCategory.FREE:
+                archipelago_rule = (
+                    "\n\nCRITICAL RULE: You MUST strictly ensure the mutated code you write natively "
+                    f"uses the '{target_category.value}' algorithmic paradigm."
+                )
+                patch_sys += archipelago_rule
+
             total_costs = 0.0
             msg_history = []
 
@@ -3327,6 +3355,7 @@ class ShinkaEvolveRunner:
                         patch_name=None,
                         patch_description=None,
                         success=False,
+                        target_category=target_category,
                     )
 
                     if patch_attempt < self.evo_config.max_patch_attempts - 1:
@@ -3385,6 +3414,7 @@ class ShinkaEvolveRunner:
                         patch_name=patch_name,
                         patch_description=patch_description,
                         success=True,
+                        target_category=target_category,
                     )
 
                     # Update LLM selection costs
@@ -3430,6 +3460,7 @@ class ShinkaEvolveRunner:
                     patch_name=patch_name,
                     patch_description=patch_description,
                     success=False,
+                    target_category=target_category,
                 )
 
                 if self.verbose:
@@ -3461,6 +3492,7 @@ class ShinkaEvolveRunner:
                 "novelty_attempt": novelty_attempt,
                 "resample_attempt": resample_attempt,
                 "patch_attempt": self.evo_config.max_patch_attempts,
+                "target_category": target_category.value,
                 **llm_kwargs,  # Spread llm_kwargs like _run_patch_async
                 "llm_result": response.to_dict() if response else None,
             }
@@ -3469,7 +3501,15 @@ class ShinkaEvolveRunner:
 
         except Exception as e:
             logger.error(f"Error in fix patch async: {e}")
-            return None, {"api_costs": 0.0, "error_attempt": str(e)}, False
+            return (
+                None,
+                {
+                    "api_costs": 0.0,
+                    "error_attempt": str(e),
+                    "target_category": locals().get("target_category", AlgorithmCategory.FREE).value,
+                },
+                False,
+            )
 
     async def _run_patch_async(
         self,
@@ -3515,6 +3555,15 @@ class ShinkaEvolveRunner:
                 if current_prompt_id:
                     logger.info(f"Using evolved prompt: {current_prompt_id[:8]}...")
 
+            target_category = self._get_archipelago_category(parent_program.island_idx)
+            if target_category != AlgorithmCategory.FREE:
+                archipelago_rule = (
+                    "\n\nCRITICAL RULE: You MUST strictly ensure the mutated code you write natively "
+                    f"uses the '{target_category.value}' algorithmic paradigm."
+                )
+                patch_sys += archipelago_rule
+                logger.info(f"DEBUG: Injected paradigm '{target_category.value}' for Island {parent_program.island_idx}")
+
             total_costs = 0.0
             msg_history = []
 
@@ -3552,6 +3601,7 @@ class ShinkaEvolveRunner:
                         patch_name=None,
                         patch_description=None,
                         success=False,
+                        target_category=target_category,
                     )
 
                     if patch_attempt < self.evo_config.max_patch_attempts - 1:
@@ -3622,6 +3672,7 @@ class ShinkaEvolveRunner:
                         patch_name=patch_name,
                         patch_description=patch_description,
                         success=True,
+                        target_category=target_category,
                     )
 
                     # Update LLM selection costs
@@ -3640,6 +3691,7 @@ class ShinkaEvolveRunner:
                         "resample_attempt": resample_attempt,
                         "patch_attempt": patch_attempt + 1,
                         "system_prompt_id": current_prompt_id,  # Track evolved prompt
+                        "target_category": target_category.value,
                         **llm_kwargs,
                         "llm_result": response.to_dict() if response else None,
                     }
@@ -3666,6 +3718,7 @@ class ShinkaEvolveRunner:
                         patch_name=patch_name,
                         patch_description=patch_description,
                         success=False,
+                        target_category=target_category,
                     )
 
                     patch_msg = f"The previous edit was not successful. Error: {error_str}\n\nTry again."
@@ -3693,6 +3746,7 @@ class ShinkaEvolveRunner:
                 "resample_attempt": resample_attempt,
                 "patch_attempt": self.evo_config.max_patch_attempts,
                 "system_prompt_id": current_prompt_id,  # Track evolved prompt
+                "target_category": target_category.value,
                 **llm_kwargs,
                 "llm_result": response.to_dict() if "response" in locals() and response else None,
             }
@@ -3709,6 +3763,7 @@ class ShinkaEvolveRunner:
                     "api_costs": 0.0,
                     "error_attempt": str(e),
                     "system_prompt_id": current_prompt_id,
+                    "target_category": locals().get("target_category", AlgorithmCategory.FREE).value,
                 },
                 False,
             )
@@ -3883,6 +3938,9 @@ class ShinkaEvolveRunner:
                 text_feedback=failure_reason,
                 timestamp=datetime.now().timestamp(),
                 parent_id=parent_program.id if parent_program else None,
+                category=AlgorithmCategory(
+                    (meta_patch_data or {}).get("target_category", AlgorithmCategory.FREE.value)
+                ),
                 archive_inspiration_ids=[p.id for p in archive_programs],
                 top_k_inspiration_ids=[p.id for p in top_k_programs],
                 code_diff=code_diff,
@@ -4018,6 +4076,7 @@ class ShinkaEvolveRunner:
                 text_feedback=text_feedback,
                 timestamp=datetime.now().timestamp(),
                 parent_id=job.parent_id,
+                category=job.target_category if job.target_category else AlgorithmCategory.FREE,
                 archive_inspiration_ids=job.archive_insp_ids,
                 top_k_inspiration_ids=job.top_k_insp_ids,
                 code_diff=job.code_diff,

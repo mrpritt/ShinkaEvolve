@@ -16,9 +16,9 @@ from .island_sampler import create_island_sampler, IslandSampler
 from .display import DatabaseDisplay
 from shinka.embed import EmbeddingClient
 from shinka.defaults import default_archive_criteria
+from shinka.database.types import AlgorithmCategory
 
 logger = logging.getLogger(__name__)
-
 
 def clean_nan_values(obj: Any) -> Any:
     """
@@ -191,6 +191,9 @@ class Program:
     # Meta-prompt evolution: track which system prompt generated this program
     system_prompt_id: Optional[str] = None
 
+    # NOTE: New category feature
+    category: AlgorithmCategory = AlgorithmCategory.FREE
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dict representation, cleaning NaN values for JSON."""
         data = asdict(self)
@@ -253,6 +256,15 @@ class Program:
             data["migration_history"] = migration_history_val
         else:
             data["migration_history"] = []
+
+        category_val = data.get("category")
+        if isinstance(category_val, str):
+            try:
+                data["category"] = AlgorithmCategory(category_val)
+            except ValueError:
+                data["category"] = AlgorithmCategory.FREE
+        elif not isinstance(category_val, AlgorithmCategory):
+            data["category"] = AlgorithmCategory.FREE
 
         # Filter out keys not in Program fields to avoid TypeError with **data
         program_fields = {f.name for f in cls.__dataclass_fields__.values()}
@@ -441,7 +453,8 @@ class ProgramDatabase:
                 metadata TEXT,      -- JSON serialized Dict[str, Any]
                 migration_history TEXT, -- JSON of migration events
                 island_idx INTEGER,  -- Add island_idx to the schema
-                system_prompt_id TEXT  -- ID of system prompt that generated this program
+                system_prompt_id TEXT,  -- ID of system prompt that generated this program
+                category TEXT -- Algorithm category
             )
             """
         )
@@ -867,9 +880,9 @@ class ProgramDatabase:
                     text_feedback, complexity, embedding, embedding_pca_2d,
                     embedding_pca_3d, embedding_cluster_id, correct,
                     children_count, metadata, island_idx, migration_history,
-                    system_prompt_id)
+                    system_prompt_id, category)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                           ?, ?, ?, ?, ?, ?, ?)
+                           ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     program.id,
@@ -896,6 +909,7 @@ class ProgramDatabase:
                     program.island_idx,
                     migration_history_json,
                     program.system_prompt_id,
+                    program.category.value,
                 ),
             )
 
@@ -1127,6 +1141,9 @@ class ProgramDatabase:
 
         # Handle archive status
         program_data["in_archive"] = bool(program_data.get("in_archive", 0))
+
+        if "category" in program_data:
+            program_data["category"] = program_data["category"]
 
         return Program.from_dict(program_data)
 

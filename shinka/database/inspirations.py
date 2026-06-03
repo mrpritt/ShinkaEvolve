@@ -3,6 +3,8 @@ import sqlite3
 from abc import ABC, abstractmethod
 from typing import Optional, Callable, Any, List, Set, Literal
 
+from shinka.database.types import AlgorithmCategory
+
 logger = logging.getLogger(__name__)
 
 
@@ -255,6 +257,8 @@ class CombinedContextSelector:
         get_island_idx_func: Optional[Callable[[str], Optional[int]]] = None,
         program_from_row_func: Optional[Callable[[sqlite3.Row], Any]] = None,
     ):
+        self.cursor = cursor
+        self.program_from_row = program_from_row_func
         self.archive_selector = ArchiveInspirationSelector(
             cursor=cursor,
             conn=conn,
@@ -278,6 +282,59 @@ class CombinedContextSelector:
         self, parent: Any, num_archive: int, num_topk: int
     ) -> tuple[List[Any], List[Any]]:
         """Sample both archive inspirations and top-k inspirations."""
+
+        # --- EXACT CHANGE: The 60/40 Archipelago Split ---
+        if parent and hasattr(parent, "category") and parent.category != AlgorithmCategory.FREE:
+            parent_cat = parent.category.value
+
+            # Calculate 60/40 split for top-k
+            topk_same = max(1, int(num_topk * 0.6)) if num_topk > 0 else 0
+            topk_other = num_topk - topk_same
+
+            # Calculate 60/40 split for random archive
+            arch_same = max(1, int(num_archive * 0.6)) if num_archive > 0 else 0
+            arch_other = num_archive - arch_same
+
+            archive_inspirations = []
+            top_k_inspirations = []
+
+            # Helper to fetch programs
+            def fetch_programs(limit: int, same_cat: bool, order_by: str):
+                if limit <= 0:
+                    return []
+                op = "=" if same_cat else "!="
+                self.cursor.execute(
+                    f"""
+                    SELECT p.* FROM programs p 
+                    JOIN archive a ON p.id = a.program_id 
+                    WHERE p.correct = 1 AND p.category {op} ? AND p.id != ?
+                    ORDER BY {order_by} LIMIT ?
+                    """,
+                    (parent_cat, parent.id, limit),
+                )
+                rows = self.cursor.fetchall()
+                if self.program_from_row:
+                    return [self.program_from_row(row) for row in rows]
+                return []
+
+            # Fetch Top-K (ordered by score)
+            top_k_inspirations.extend(fetch_programs(topk_same, True, "p.combined_score DESC"))
+            top_k_inspirations.extend(fetch_programs(topk_other, False, "p.combined_score DESC"))
+
+            # Fetch Archive (randomly ordered)
+            archive_inspirations.extend(fetch_programs(arch_same, True, "RANDOM()"))
+            archive_inspirations.extend(fetch_programs(arch_other, False, "RANDOM()"))
+
+            # Clean up any None values
+            archive_inspirations = [p for p in archive_inspirations if p]
+            top_k_inspirations = [p for p in top_k_inspirations if p]
+
+            if archive_inspirations or top_k_inspirations:
+                logger.info(f"Archipelago 60/40 Split Applied for category '{parent_cat}'")
+                return archive_inspirations, top_k_inspirations
+        # -------------------------------------------------
+
+        # Fallback to standard ShinkaEvolve logic if category is FREE or missing
         archive_inspirations = self.archive_selector.sample_context(parent, num_archive)
         top_k_inspirations = self.topk_selector.sample_context(
             parent, archive_inspirations, num_topk
