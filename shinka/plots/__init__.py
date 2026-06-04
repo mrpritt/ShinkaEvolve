@@ -1,3 +1,4 @@
+from .plot_archipelago import split_df_by_category
 from .plot_lineage_tree import plot_lineage_tree
 from .plot_evals import plot_evals_performance, plot_evals_performance_compare
 from .plot_pareto import plot_pareto_curve, plot_pareto_compare
@@ -19,6 +20,7 @@ from .plot_throughput import (
 )
 
 __all__ = [
+    "split_df_by_category",
     "plot_lineage_tree",
     "plot_evals_performance",
     "plot_evals_performance_compare",

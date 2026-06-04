@@ -16,6 +16,7 @@ def plot_lineage_tree(
     ax: Axes | None = None,
     vmin: Optional[float] = None,
     vmax: Optional[float] = None,
+    category_filter: Optional[str] = None,
 ):
     """
     Generates a tree visualization of program lineage using matplotlib and
@@ -29,6 +30,17 @@ def plot_lineage_tree(
     if df is None or df.empty:
         print("DataFrame is empty or None. Cannot draw tree.")
         return
+
+    if 'category' not in df.columns and 'metadata' in df.columns:
+        df['category'] = df['metadata'].apply(
+            lambda x: x.get('target_category', 'Any/free') if isinstance(x, dict) else 'Any/free'
+        )
+
+    # <-- ADD THIS FILTER LOGIC -->
+    if category_filter:
+        # Keep Gen 0 (the root) AND the specific category
+        df = df[(df['category'] == category_filter) | (df['generation'] == 0)].copy()
+        title = f"{title} ({category_filter})"
 
     # Handle island copies: map them to their original program
     island_copy_mapping = {}
